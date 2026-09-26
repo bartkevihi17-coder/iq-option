@@ -53,9 +53,11 @@ function normalizeIqAssets(){
       .map(a=>{
         const name=String(a.name);
         const compact=name.replace(/[^A-Za-z0-9]/g,"").toUpperCase();
-        const badge=(name.match(/[A-Za-z0-9]+/)||["IQ"])[0].slice(0,5).toUpperCase();
-        const precision=/BTC|BITCOIN|ETH|CRYPTO/i.test(name)?2:5;
-        return {name, symbol:compact||("IQ"+a.active_id), badge, activeId:Number(a.active_id), p:precision};
+        const ticker=String(a.ticker||"").trim().toUpperCase();
+        const symbol=ticker||compact||("IQ"+a.active_id);
+        const badge=(ticker||((name.match(/[A-Za-z0-9]+/)||["IQ"])[0])).slice(0,5).toUpperCase();
+        const precision=/BTC|BITCOIN|ETH|CRYPTO/i.test(name+" "+ticker)?2:5;
+        return {name, symbol, badge, activeId:Number(a.active_id), p:precision};
       });
   }catch{
     return [];
