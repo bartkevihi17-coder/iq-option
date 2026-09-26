@@ -24,6 +24,7 @@ let busy=false;
 let buffer=0;
 let events=[];
 let zoom=1;
+let oneShotPending=true;
 const BASE_VISIBLE=180;
 
 const $=id=>document.getElementById(id);
@@ -94,6 +95,10 @@ function handlePrice(price,at){
   if(pts.length>720)pts.shift();
   update();
   evaluate();
+  if(oneShotPending&&pts.length>=12){
+    oneShotPending=false;
+    sendGraphStateOnce(true).catch(()=>{});
+  }
 }
 async function connect(a){
   asset=a;
@@ -261,37 +266,109 @@ function search(q){
   $("results").classList.add("open");
   document.querySelectorAll(".assetopt").forEach((el,i)=>el.onclick=()=>{let a=f[i];if(a){connect(a);$("search").value="";$("results").classList.remove("open");}});
 }
+function buildGraphState(){
+  const values=pts.map(x=>x.p);
+  const e9=ema(values,9);
+  const e21=ema(values,21);
+  const rv=calcRsi(values);
+  const vel=velocity();
+  const visibleCount=clamp(Math.round(BASE_VISIBLE/zoom),24,720);
+  const start=Math.max(0,pts.length-visibleCount);
+  const visible=pts.slice(start).map((pt,i)=>{
+    const idx=start+i;
+    return {
+      t:pt.t,
+      price:pt.p,
+      ema9:Number.isFinite(e9[idx])?e9[idx]:null,
+      ema21:Number.isFinite(e21[idx])?e21[idx]:null
+    };
+  });
+  const ema9Now=e9.length?e9[e9.length-1]:null;
+  const ema21Now=e21.length?e21[e21.length-1]:null;
+  const trend=Number.isFinite(ema9Now)&&Number.isFinite(ema21Now)?(ema9Now>ema21Now?"up":ema9Now<ema21Now?"down":"flat"):"unknown";
+  const changePercent=Number.isFinite(first)&&Number.isFinite(last)&&first!==0?((last-first)/first*100):null;
+  let ruleState=null;
+  if(rule&&Number.isFinite(last)){
+    const distance=Math.abs(rule.target-last);
+    const distancePercent=distance/last*100;
+    const toward=(rule.target-last)*vel>0;
+    const etaSeconds=toward&&Math.abs(vel)>1e-8?distance/Math.abs(vel):null;
+    ruleState={...rule,distance,distancePercent,etaSeconds:toward?etaSeconds:null};
+  }
+  return {
+    version:1,
+    generatedAt:new Date().toISOString(),
+    provider,
+    asset:{
+      name:asset&&asset.name||null,
+      symbol:asset&&asset.symbol||null,
+      badge:asset&&asset.badge||null,
+      activeId:asset&&Number.isFinite(Number(asset.activeId))?Number(asset.activeId):null,
+      precision:asset&&asset.p||null
+    },
+    price:Number.isFinite(last)?last:null,
+    session:{
+      firstPrice:Number.isFinite(first)?first:null,
+      changePercent
+    },
+    zoom:{
+      factor:zoom,
+      percent:Math.round(zoom*100),
+      visiblePoints:visible.length,
+      requestedVisiblePoints:visibleCount
+    },
+    indicators:{
+      ema9:Number.isFinite(ema9Now)?ema9Now:null,
+      ema21:Number.isFinite(ema21Now)?ema21Now:null,
+      rsi14:Number.isFinite(rv)?rv:null,
+      velocityPerSecond:Number.isFinite(vel)?vel:null,
+      trend
+    },
+    rule:ruleState,
+    signal:{
+      title:$("signalTitle").textContent||null,
+      state:($("signal").className||"").replace("signal","").trim()||"neutral",
+      text:$("signal").textContent||null,
+      scorePercent:Number.parseFloat($("score").textContent)||null
+    },
+    series:visible
+  };
+}
+async function sendGraphStateOnce(silent){
+  if(!Number.isFinite(last)||pts.length<2)return {ok:false,error:"Aguardando dados do gráfico"};
+  const up=await ipcRenderer.invoke("upload-graph",buildGraphState());
+  if(!up.ok)throw new Error(up.error||("HTTP "+up.status));
+  buffer=Number(up.count||Math.min(10,buffer+1));
+  $("buffer").textContent=buffer+" / 10";
+  $("last").textContent=new Date().toLocaleTimeString("pt-BR");
+  $("lastDetail").textContent=up.stored||"estado enviado";
+  if(!silent)addEvent("vps","Estado do gráfico enviado",(asset.symbol||asset.name)+" • "+buffer+"/10");
+  return up;
+}
 function setStream(on){
   $("streamBtn").classList.toggle("active",on);
-  $("streamBtn").innerHTML='<i></i> '+(on?"Enviando pra VPS":"Mandar pra VPS");
+  $("streamBtn").innerHTML='<i></i> '+(on?"Enviando dados":"Mandar pra VPS");
   $("streamBtn2").textContent=on?"Parar envio":"Iniciar envio";
-  $("streamState").textContent=on?"Enviando":"Parado";
+  $("streamState").textContent=on?"Enviando dados":"Parado";
 }
 async function toggleStream(){
   if(timer){
     clearInterval(timer);timer=null;setStream(false);
-    addEvent("vps","Streaming parado","Capturas encerradas.");
+    addEvent("vps","Streaming parado","Envio dos dados do gráfico encerrado.");
     return;
   }
   let cfg=await ipcRenderer.invoke("runtime-config");
   if(!cfg.vpsConfigured){notify("VPS não configurada","Credencial do Enfoque Network Agent não encontrada.");return;}
   setStream(true);
-  addEvent("vps","Streaming iniciado","1 captura por segundo; buffer máximo 10.");
+  addEvent("vps","Streaming do gráfico iniciado","1 estado JSON por segundo; buffer máximo 10.");
   async function tick(){
     if(busy)return;
     busy=true;
     try{
-      let cap=await ipcRenderer.invoke("capture-primary");
-      if(!cap.ok)throw new Error(cap.error||"Falha ao capturar");
-      let up=await ipcRenderer.invoke("upload-shot",{imageBase64:cap.dataUrl,asset:asset.symbol||asset.name,capturedAt:new Date().toISOString()});
-      if(!up.ok)throw new Error(up.error||("HTTP "+up.status));
-      buffer=Number(up.count||Math.min(10,buffer+1));
-      $("buffer").textContent=buffer+" / 10";
-      $("last").textContent=new Date().toLocaleTimeString("pt-BR");
-      $("lastDetail").textContent=up.stored||"enviado";
+      await sendGraphStateOnce(true);
     }catch(e){
       $("lastDetail").textContent=String(e.message||e);
-      addEvent("erro","Falha no envio",String(e.message||e));
+      addEvent("erro","Falha no envio do gráfico",String(e.message||e));
     }finally{busy=false;}
   }
   await tick();
