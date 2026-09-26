@@ -4,6 +4,7 @@ const path=require("path");
 const Broker=require("iqoption");
 
 const VPS_ENDPOINT="https://mcp.enfoquepapelaria.com.br/iq-assistant/upload";
+const VPS_GRAPH_ENDPOINT="https://mcp.enfoquepapelaria.com.br/iq-assistant/graph";
 const AGENT_CREDENTIALS="C:\\ProgramData\\Enfoque\\NetworkAgent\\credentials.json";
 
 let mainWindow=null;
@@ -219,6 +220,22 @@ ipcMain.handle("upload-shot",async(_e,p)=>{
     const b=await r.json().catch(()=>({}));
     return Object.assign({ok:r.ok,status:r.status},b);
   }catch(err){return {ok:false,error:String(err&&err.message||err)};}
+});
+
+ipcMain.handle("upload-graph",async(_e,state)=>{
+  const c=agentCredentials();
+  if(!c||!c.agentToken)return {ok:false,error:"Credencial do Enfoque Network Agent não encontrada"};
+  try{
+    const r=await fetch(VPS_GRAPH_ENDPOINT,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+c.agentToken},
+      body:JSON.stringify(state||{})
+    });
+    const b=await r.json().catch(()=>({}));
+    return Object.assign({ok:r.ok,status:r.status},b);
+  }catch(err){
+    return {ok:false,error:String(err&&err.message||err)};
+  }
 });
 
 app.whenReady().then(createWindow);
