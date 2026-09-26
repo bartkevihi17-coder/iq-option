@@ -10,5 +10,8 @@
   },
   "devDependencies": {
     "electron": "^38.1.2"
+  },
+  "dependencies": {
+    "iqoption": "^1.0.1"
   }
 }
