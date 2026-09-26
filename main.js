@@ -170,6 +170,7 @@ ipcMain.handle("iq-autoconnect",async()=>{
     const status=await connectIq({ssid,remember:true});
     return {ok:true,...status};
   }catch(err){
+    await cleanupIqBroker();
     return {ok:false,error:String(err&&err.message||err),...iqStatus()};
   }
 });
