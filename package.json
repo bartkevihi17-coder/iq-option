@@ -1,0 +1,14 @@
+{
+  "name": "iq-option-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Assistente desktop de mercado com alertas e streaming para VPS",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.1.2"
+  }
+}
